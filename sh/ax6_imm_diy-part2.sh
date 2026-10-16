@@ -153,3 +153,37 @@ sed -i 's/^PKG_BUILD_PARALLEL:=1/PKG_BUILD_PARALLEL:=0/' $BASE_PATH/action_build
 
 echo "========================="
 echo " 自定义(fichen) 配置完成……"
+
+# ========== 添加 PassWall 和 MosDNS 的 Feed 源 ==========
+echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> $BASE_PATH/action_build/feeds.conf.default
+echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall.git;main" >> $BASE_PATH/action_build/feeds.conf.default
+echo "src-git mosdns https://github.com/sbwml/luci-app-mosdns.git;v5" >> $BASE_PATH/action_build/feeds.conf.default
+
+# ========== 更新并安装 feeds ==========
+cd $BASE_PATH/action_build
+./scripts/feeds update -a
+./scripts/feeds install -a
+
+# ========== 删除 miniupnpd，避免编译报错 ==========
+rm -rf $BASE_PATH/action_build/feeds/packages/net/miniupnpd
+
+# ========== 强制勾选 PassWall 和 MosDNS ==========
+echo "CONFIG_PACKAGE_luci-app-passwall=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-passwall_Nftables_Transparent_Proxy=y" >> .config
+echo "CONFIG_PACKAGE_luci-app-mosdns=y" >> .config
+echo "CONFIG_PACKAGE_v2ray-geodata=y" >> .config
+echo "CONFIG_PACKAGE_xray-core=y" >> .config
+echo "CONFIG_PACKAGE_shadowsocks-libev-ss-local=y" >> .config
+echo "CONFIG_PACKAGE_shadowsocks-libev-ss-redir=y" >> .config
+echo "CONFIG_PACKAGE_simple-obfs=y" >> .config
+
+# ========== 删除多余插件 ==========
+sed -i '/CONFIG_PACKAGE_luci-app-openclash/d' .config
+sed -i '/CONFIG_PACKAGE_luci-app-homeproxy/d' .config
+sed -i '/CONFIG_PACKAGE_luci-app-adguardhome/d' .config
+sed -i '/CONFIG_PACKAGE_luci-app-smartdns/d' .config
+sed -i '/CONFIG_PACKAGE_luci-app-lucky/d' .config
+
+# ========== 最后应用配置 ==========
+make defconfig
