@@ -86,6 +86,32 @@ if ! ver_ge "${xray_now:-0}" "$XRAY_MIN"; then
 fi
 
 # ---------------------------------------------------------------------
+# 修复 luci-app-mosdns 缺 geo2txt 依赖
+#   上游 custom_feed 只同步了 mosdns / luci-app-mosdns 两个目录，漏了 geo2txt，
+#   打包阶段会报：
+#     pkg_hash_check_unresolved: cannot find dependency geo2txt for luci-app-mosdns
+#     opkg_install_cmd: Cannot install package luci-app-mosdns.
+#   geo2txt 是纯 C 小工具（PKG_SOURCE 自己从 codeload 下，不依赖别的包），
+#   补进 package/ 后会被 defconfig 自动选中。
+# ---------------------------------------------------------------------
+if [ ! -d "$BUILD_PATH/package/geo2txt" ]; then
+    echo ">>> 补充 geo2txt（luci-app-mosdns 的依赖）"
+    _tmp_mosdns=$(mktemp -d)
+    git clone --depth 1 -b v5 --filter=blob:none --sparse \
+        https://github.com/sbwml/luci-app-mosdns.git "$_tmp_mosdns" >/dev/null 2>&1 || true
+    if [ -d "$_tmp_mosdns" ]; then
+        ( cd "$_tmp_mosdns" && git sparse-checkout set geo2txt >/dev/null 2>&1 ) || true
+    fi
+    if [ -d "$_tmp_mosdns/geo2txt" ]; then
+        mv "$_tmp_mosdns/geo2txt" "$BUILD_PATH/package/geo2txt"
+        echo ">>> geo2txt 已补入 package/"
+    else
+        echo "WARNING: geo2txt 拉取失败，mosdns 可能在打包阶段报依赖缺失" >&2
+    fi
+    rm -rf "$_tmp_mosdns"
+fi
+
+# ---------------------------------------------------------------------
 # 打印关键包版本，方便在 Actions 日志里一眼确认（不改任何东西）
 # ---------------------------------------------------------------------
 print_pkg_version() {
