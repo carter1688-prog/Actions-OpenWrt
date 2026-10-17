@@ -187,3 +187,5 @@ sed -i '/CONFIG_PACKAGE_luci-app-lucky/d' .config
 
 # ========== 最后应用配置 ==========
 make defconfig
+sed -i '/CONFIG_PACKAGE_ucode-mod-lua=y/a\ CONFIG_PACKAGE_ucode-mod-math=y' .config
+
