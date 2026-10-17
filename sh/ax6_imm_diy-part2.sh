@@ -188,4 +188,19 @@ sed -i '/CONFIG_PACKAGE_luci-app-lucky/d' .config
 # ========== 最后应用配置 ==========
 make defconfig
 sed -i '/CONFIG_PACKAGE_ucode-mod-lua=y/a\ CONFIG_PACKAGE_ucode-mod-math=y' .config
+# ============ 植入新版 Xray v26.7.11 arm64 ============
+cd $BASE_PATH/action_build
+# 创建全局files目录，打包固件时直接覆盖镜像内/usr/bin
+mkdir -p files/usr/bin
+
+XRAY_VER="v26.7.11"
+XRAY_ARCH="arm64"
+XRAY_URL="https://cdn.jsdelivr.net/gh/XTLS/Xray-core@${XRAY_VER}/Xray-linux-${XRAY_ARCH}"
+
+echo "开始下载 Xray ${XRAY_VER}"
+# 去掉 -q，打印下载日志，方便排查
+wget --no-check-certificate -O files/usr/bin/xray ${XRAY_URL}
+chmod +x files/usr/bin/xray
+echo "Xray ${XRAY_VER} 写入 files/usr/bin 完成"
+
 
