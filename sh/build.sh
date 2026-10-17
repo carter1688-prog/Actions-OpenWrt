@@ -431,7 +431,9 @@ if [[ -d action_build ]]; then
 fi
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
-bash "$REPO_ROOT/${DIYmy_SH:-sh/ax6_imm_diy-part2.sh}"
+# 原版这里写死了 /home/runner/work/Actions-OpenWrt/Actions-OpenWrt/sh/xxx.sh，
+# 一旦仓库改名或本地/容器模式运行就会因 set -e 直接中断。改为相对定位。
+bash "$REPO_ROOT/sh/$(basename "${DIYmy_SH:-sh/ax6_imm_diy-part2.sh}")"
 
 apply_config
 print_config_fragment_summary
@@ -456,19 +458,29 @@ if [[ -d $TARGET_DIR ]]; then
     find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec rm -f {} +
 fi
 
+# 单包下载失败不应拖垮整轮构建：失败后串行重试一次。
 make download -j8 || make download -j1 V=s
-make -j$(($(nproc) + 1)) || make -j1 V=s
 
-cd $BASE_PATH/../$BUILD_DIR/bin/packages
-tar -zcvf Packages.tar.gz ./*
-cp Packages.tar.gz $BASE_PATH/../$BUILD_DIR/bin/targets/
-cd "$BASE_PATH/../$BUILD_DIR"
+# 构建失败时自动留档并摘出关键错误行，省掉“翻几千行日志”的步骤。
+if ! make -j$(($(nproc) + 1)); then
+    echo "===== 多线程构建失败，转单线程并完整留档 ====="
+    make -j1 V=s 2>&1 | tee build_full.log || true
+    echo "===== 失败上下文（自动摘取） ====="
+    grep -nE "ERROR: module|Error [0-9]+|failed to build|Collected errors|No space left|No rule to make" build_full.log | tail -30 || true
+    exit 1
+fi
 
 FIRMWARE_DIR="$BASE_PATH/../firmware"
 \rm -rf "$FIRMWARE_DIR"
 mkdir -p "$FIRMWARE_DIR"
-find "$TARGET_DIR" -type f \( -name "*sysupgrade.bin" -o -name "*initramfs*.itb" -o -name "*.manifest" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
-\rm -f "$BASE_PATH/../firmware/Packages.manifest" 2>/dev/null
+# 只保留真正要刷的两种格式 + manifest（清单，用于 Release 正文列插件）。
+# 不再生成 Packages.tar.gz —— 少一个产物、少一步打包时间。
+find "$TARGET_DIR" -type f \( \
+    -name "*squashfs-factory.ubi" -o \
+    -name "*squashfs-sysupgrade.bin" -o \
+    -name "*squashfs-sysupgrade.tar" -o \
+    -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
+\rm -f "$FIRMWARE_DIR/Packages.manifest" 2>/dev/null
 
 if [[ -d action_build ]]; then
     make clean
