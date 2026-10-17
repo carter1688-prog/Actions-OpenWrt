@@ -431,7 +431,7 @@ if [[ -d action_build ]]; then
 fi
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
-/home/runner/work/Actions-OpenWrt/Actions-OpenWrt/sh/ax6_imm_diy-part2.sh
+bash "$REPO_ROOT/${DIYmy_SH:-sh/ax6_imm_diy-part2.sh}"
 
 apply_config
 print_config_fragment_summary
@@ -456,7 +456,7 @@ if [[ -d $TARGET_DIR ]]; then
     find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec rm -f {} +
 fi
 
-make download -j$(($(nproc) * 2))
+make download -j8 || make download -j1 V=s
 make -j$(($(nproc) + 1)) || make -j1 V=s
 
 cd $BASE_PATH/../$BUILD_DIR/bin/packages
@@ -467,7 +467,7 @@ cd "$BASE_PATH/../$BUILD_DIR"
 FIRMWARE_DIR="$BASE_PATH/../firmware"
 \rm -rf "$FIRMWARE_DIR"
 mkdir -p "$FIRMWARE_DIR"
-find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.fip" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
+find "$TARGET_DIR" -type f \( -name "*sysupgrade.bin" -o -name "*initramfs*.itb" -o -name "*.manifest" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
 \rm -f "$BASE_PATH/../firmware/Packages.manifest" 2>/dev/null
 
 if [[ -d action_build ]]; then
