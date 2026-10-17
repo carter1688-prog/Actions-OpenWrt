@@ -42,11 +42,15 @@ BUILD_PATH="$BASE_PATH/action_build"
 #   - scripts/feeds 对「已安装的源码包」直接 return 0（静默跳过），
 #     所以在 diy 里追加 xiaorouji 的 feed 再 install 是无效的，必须直接改这份 Makefile。
 #
-# 版本/哈希取自 xiaorouji/openwrt-passwall-packages@main/xray-core/Makefile，
-# 下载地址格式与 fichenx 那份一致（codeload v$(PKG_VERSION)），哈希可直接复用。
+# 版本/哈希：
+#   - 26.7.11 是 PassWall 26.10.16 要求的最低版本，且 go.mod 只要求 Go 1.26，
+#     能配合本仓库的 Go 1.26.9 编译出来。
+#   - 26.9.9 / 26.10.10 的 go.mod 要求 Go 1.27，在这里会报
+#       "go.mod requires go >= 1.27 (running go 1.26.9)" → 编译失败。
+#   - 哈希不写死，构建时现算，避免手抄出错（算不出来才退回 skip）。
 XRAY_MIN="${XRAY_MIN:-26.7.11}"
-XRAY_VER="${XRAY_VER:-26.10.10}"
-XRAY_HASH="${XRAY_HASH:-bc4b3fbe9f2612a7e8b7fffd4b7195f00ad4aa28478f3621fce925cb6190c036}"
+XRAY_VER="${XRAY_VER:-26.7.11}"
+XRAY_HASH="${XRAY_HASH:-}"
 
 XRAY_MK="$BUILD_PATH/feeds/custom_feed/xray-core/Makefile"
 
@@ -58,6 +62,12 @@ fi
 xray_old=$(sed -n 's/^PKG_VERSION:=//p' "$XRAY_MK" | head -n1)
 if [ "$xray_old" != "$XRAY_VER" ]; then
     echo ">>> xray-core: $xray_old -> $XRAY_VER"
+    if [ -z "$XRAY_HASH" ]; then
+        echo ">>> 现算 ${XRAY_VER} 的 sha256（约 15MB，稍等）..."
+        XRAY_HASH=$(curl -fsSL "https://codeload.github.com/XTLS/Xray-core/tar.gz/v${XRAY_VER}" 2>/dev/null \
+                    | sha256sum | cut -d' ' -f1)
+    fi
+    [ -n "$XRAY_HASH" ] || { echo ">>> 哈希计算失败，退回 skip"; XRAY_HASH=skip; }
     sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$XRAY_VER/" "$XRAY_MK"
     sed -i "s/^PKG_HASH:=.*/PKG_HASH:=$XRAY_HASH/"       "$XRAY_MK"
 fi
