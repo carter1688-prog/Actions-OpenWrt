@@ -10,23 +10,23 @@ on:
         type: choice
         default: RedMi-AX6_plus_imm
         options:
-          #- aliyun_ap8220_immwrt
-          #- cmcc_rax3000m_immwrt
-          #- jdcloud_ax6000_immwrt
-          #- jdcloud_ipq60xx_immwrt
-          #- jdcloud_ipq60xx_libwrt
-          #- n1_immwrt
-          #- redmi_ax5_immwrt
           - RedMi-AX6_plus_imm
           - RedMi-AX6_plus_libwrt
-          #- redmi_ax6000_immwrt21
-          #- zn_m2_immwrt
-          #- zn_m2_libwrt
-          #- x64_immwrt
 
+  # 【已关闭定时自动编译】每周四自动出固件 = 每周给你一个未验证的新版本，与“长期稳定、不折腾”冲突。
+  # 需要自动编译时把下面两行恢复即可。
+  #schedule:
+  #  - cron: 43 3 * * 4
 
-  schedule:
-    - cron: 43 3 * * 4
+# 同一模型同时只允许一个任务在跑，避免两个任务抢同一份缓存把 staging 写脏。
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.model || 'RedMi-AX6_plus_imm' }}
+  cancel-in-progress: true
+
+# 发布 Release 需要 contents:write，Mattraks/delete-workflow-runs 需要 actions:write。
+permissions:
+  contents: write
+  actions: write
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -77,12 +77,12 @@ jobs:
           #源码标识：pre_clone_action.sh生成的repo_flag内容为REPO_URL/REPO_BRANCH；
           #imm与libwrt即使平台相同也不可共享staging（工具链/二进制不兼容）
           REPO_HASH="$(sha256sum repo_flag | cut -c1-12)"
-          #ccache按编译器哈希寻址，跨型号/平台/源码混用安全，与其他工作流全局共享一份
+          #配置指纹：config 一改，缓存立即失效，避免“旧 staging + 新配置”导致打包期缺模块
+          CFG_HASH="$(sha256sum "config/${MODEL}.config" | cut -c1-8)"
           echo "CCACHE_KEY=ccache-${RUNNER_TAG}-${CACHE_DATE}" >> $GITHUB_ENV
           echo "CCACHE_RESTORE=ccache-${RUNNER_TAG}-" >> $GITHUB_ENV
-          #staging_dir含二进制工具链，actb前缀区分本工作流的action_build构建路径
-          echo "STAGING_KEY=staging-actb-${RUNNER_TAG}-${TARGET_TOKEN}-${REPO_HASH}-${CACHE_DATE}" >> $GITHUB_ENV
-          echo "STAGING_RESTORE=staging-actb-${RUNNER_TAG}-${TARGET_TOKEN}-${REPO_HASH}-" >> $GITHUB_ENV
+          echo "STAGING_KEY=staging-actb-${RUNNER_TAG}-${TARGET_TOKEN}-${REPO_HASH}-${CFG_HASH}-${CACHE_DATE}" >> $GITHUB_ENV
+          echo "STAGING_RESTORE=staging-actb-${RUNNER_TAG}-${TARGET_TOKEN}-${REPO_HASH}-${CFG_HASH}-" >> $GITHUB_ENV
           echo "缓存标识: ${CCACHE_KEY} / ${STAGING_KEY}"
 
       - name: 恢复ccache缓存
@@ -109,12 +109,26 @@ jobs:
             done
           fi
 
+      # 在 Windows 上编辑过的 .ini/.config 若带 CRLF，会污染 awk 解析出来的路径。
+      - name: 归一化换行
+        run: |
+          find config sh -type f \( -name "*.config" -o -name "*.ini" -o -name "*.sh" \) -exec dos2unix -q {} + || true
+
       - name: 构建固件
         run: |
           cp -rf config/compilecfg wrt_core/
           cp -rf config/*.config wrt_core/deconfig/
           chmod +x $DIY_my_SH
           ./sh/build.sh ${{ inputs.model || 'RedMi-AX6_plus_imm'}}
+
+      # 失败时把完整构建日志带回来，不用再到几千行里翻。
+      - name: 上传失败日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-failure-log
+          path: action_build/build_full.log
+          if-no-files-found: ignore
 
       #失败也保存缓存（staging已由build.sh保留，不再执行make clean）
       - name: 保存ccache缓存
@@ -135,41 +149,20 @@ jobs:
 
       - name: 获取内核版本
         run: |
-          # 获取内核版本
           echo "KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-[4-6]\.*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")" >> $GITHUB_ENV
-          #获取最近更新内容
           cd action_build
           useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
           echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
           cd ..
-          
+
       - name: 缓存统计
         if: always()
         run: |
-          #旧方案在构建后gh cache delete会把刚保存的新缓存一并删掉，导致下次冷编译；
-          #改由GitHub缓存策略自动淘汰（7天未命中/总量超10G删最旧），这里仅输出统计
           echo "========cache status========"
           du -sh ./action_build/.ccache ./action_build/staging_dir 2>/dev/null || true
           if [ -x ./action_build/staging_dir/host/bin/ccache ]; then
             CCACHE_DIR=./action_build/.ccache ./action_build/staging_dir/host/bin/ccache -s || true
           fi
-
-      - name: 输出虚拟机信息
-        run: |
-          echo "=============================================="
-          lscpu | grep -E "name|Core|Thread"
-          echo "=============================================="
-          df -h
-          echo "=============================================="
-
-      - name: 封装OpenWrt固件
-        if: ${{ inputs.model == 'n1_immwrt' }}
-        uses: unifreq/openwrt_packit@master
-        env:
-          OPENWRT_ARMVIRT: firmware/*.tar.gz
-          PACKAGE_SOC: s905d
-          KERNEL_VERSION_NAME: 6.6.y
-          WHOAMI: fichen
 
       - name: 准备发布简介
         run: |
@@ -183,28 +176,17 @@ jobs:
           echo "插件：" >> release_body.txt
           echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./firmware/*.manifest | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")"  >> release_body.txt
 
-
       - name: 发布固件
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.BUILD_DATE }}_${{ inputs.model || 'RedMi-AX6_plus_imm'}}
-          files: ${{ inputs.model == 'n1_immwrt' && env.PACKAGED_OUTPUTPATH || './firmware' }}/*.*
+          files: ./firmware/*.*
           body_path: ./release_body.txt
 
-      - name: 删除旧的工作流和固件
-        uses: Mattraks/delete-workflow-runs@main
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          delete_workflow_pattern: Release_Redmi-AX6 plus（imm）
-          retain_days: 20
-          keep_minimum_runs: 5
-    
       - name: 删除旧的发布版本
         uses: codesnas/delete-older-releases@main
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        if: ${{ !cancelled() }}
         with:
-          #repo:
           keep_latest: 5
           delete_tag_pattern: ${{ inputs.model || 'RedMi-AX6_plus_imm'}}
           delete_tags: true
